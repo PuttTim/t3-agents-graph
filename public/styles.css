@@ -562,6 +562,113 @@ select[hidden] {
   display: none;
 }
 
+/* ---------- replay ---------- */
+
+.bar {
+  position: relative;
+}
+
+.replay {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.replay[hidden] {
+  display: none;
+}
+
+.replay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.replay-btn:hover {
+  border-color: color-mix(in srgb, var(--wire) 45%, var(--border));
+}
+
+.replay-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.replaying .replay-btn {
+  color: var(--run-fg);
+  background: var(--run-bg);
+  border-color: transparent;
+}
+
+.replay-btn .when {
+  color: var(--muted);
+  margin-left: 2px;
+}
+
+.replaying .replay-btn .when {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.speeds {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 2px;
+  gap: 2px;
+  background: var(--card);
+}
+
+.speeds button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  height: 22px;
+  min-width: 30px;
+  padding: 0 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.speeds button:hover {
+  color: var(--text);
+}
+
+.speeds button.on {
+  background: var(--border);
+  color: var(--text);
+}
+
+#replay-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--wire);
+  transform: scaleX(0);
+  transform-origin: left;
+  pointer-events: none;
+}
+
+.pill.idle {
+  background: var(--stop-bg);
+  color: var(--stop-fg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

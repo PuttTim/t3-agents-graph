@@ -1,5 +1,6 @@
 import { chevron, providerIcon, statusMeta, toolBadges } from "./icons.js";
 import { startDemo } from "./demo.js";
+import { buildTimeline, timeAt, treeAt } from "./replay.js";
 
 const W = 300; // keep in sync with --card-w
 const H = 136; // --card-h
@@ -63,7 +64,10 @@ function modelLabel(model, provider) {
   return bare;
 }
 
-function duration(node, now = Date.now()) {
+// Wall clock, or the replay's thread clock while a replay is playing.
+const clock = () => (replay ? replay.t : Date.now());
+
+function duration(node, now = clock()) {
   let ms;
   if (node.activeMs != null) ms = node.activeMs + (node.runStartedAt ? now - Date.parse(node.runStartedAt) : 0);
   else if (node.startedAt) ms = (node.completedAt ? Date.parse(node.completedAt) : now) - Date.parse(node.startedAt);
@@ -247,7 +251,12 @@ function render() {
   }
 
   rollup(root);
-  const { pos, links, width, height } = layout(root);
+  // A replay lays out the finished tree so cards appear in their final spot instead of reflowing.
+  const full = layout(replay ? replay.source : root);
+  const shown = new Set();
+  walk(root, (n) => shown.add(n.id));
+  const { pos, width, height } = full;
+  const links = full.links.filter((l) => shown.has(l.from.id) && shown.has(l.to.id));
   if (canvas.style.width !== `${width}px`) canvas.style.width = `${width}px`;
   if (canvas.style.height !== `${height}px`) canvas.style.height = `${height}px`;
   setAttr(wires, "width", width);
@@ -418,6 +427,7 @@ function renderThreads() {
 }
 
 select.onchange = () => {
+  stopReplay();
   const [env, threadId] = select.value ? select.value.split(/\|(.*)/s) : ["", ""];
   state.env = env;
   state.threadId = threadId;
@@ -449,6 +459,11 @@ function accept(snap) {
   state.envs = snap.envs ?? [];
   state.shownEnv = snap.env ?? "local";
   renderThreads();
+  // Keep the latest live snapshot aside while a replay owns the canvas.
+  if (replay) {
+    if (snap.tree?.id === shownRoot) replay.live = snap.tree;
+    return;
+  }
   if (!snap.tree && snap.error) {
     state.tree = null;
     render();
@@ -460,6 +475,10 @@ function accept(snap) {
   shownRoot = snap.tree?.id ?? null;
   state.tree = snap.tree;
   render();
+  if (autoReplay && state.tree) {
+    autoReplay = false;
+    startReplay();
+  }
 }
 
 function connect() {
@@ -470,6 +489,95 @@ function connect() {
   if (params.get("token")) q.set("token", params.get("token"));
   source = new EventSource(`/api/stream?${q}`);
   source.onmessage = (e) => accept(JSON.parse(e.data));
+}
+
+// ---------- replay ----------
+
+const SPEEDS = [2, 5, 10];
+let replay = null; // { tl, source, live, speed, p, wall, t, ended }
+let speed = Number(params.get("replay")) || Number(localStorage.getItem("agents-replay-speed")) || 5;
+if (!SPEEDS.includes(speed)) speed = 5;
+let autoReplay = params.has("replay"); // ?replay or ?replay=10 starts one as soon as data arrives
+const replayBtn = $("#replay-btn");
+const speedsEl = $("#speeds");
+const progress = $("#replay-progress");
+
+speedsEl.innerHTML = SPEEDS.map((x) => `<button data-speed="${x}">${x}x</button>`).join("");
+const paintSpeeds = () => speedsEl.querySelectorAll("button").forEach((b) => b.classList.toggle("on", Number(b.dataset.speed) === speed));
+paintSpeeds();
+
+speedsEl.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (replay) {
+    // Re-anchor so changing speed mid-replay doesn't jump.
+    replay.p = position();
+    replay.wall = performance.now();
+  }
+  speed = Number(b.dataset.speed);
+  localStorage.setItem("agents-replay-speed", speed);
+  paintSpeeds();
+  if (!replay) startReplay();
+});
+
+replayBtn.onclick = () => (replay ? stopReplay() : startReplay());
+addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() === "r" && !e.metaKey && !e.ctrlKey && !e.target.closest?.("select, input")) replayBtn.click();
+});
+
+const position = () => (replay.ended ? replay.tl.total : Math.min(replay.tl.total, replay.p + (performance.now() - replay.wall) * speed));
+
+const clockText = (msWall) => {
+  const s = Math.max(0, Math.round(msWall / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+function startReplay() {
+  const source = replay?.source ?? state.tree;
+  if (!source) return;
+  const tl = buildTimeline(source);
+  if (!tl) return;
+  // ?at=0.4 starts 40% of the way in (only for the first, URL-driven replay).
+  const at = Math.min(1, Math.max(0, Number(params.get("at")) || 0));
+  params.delete("at");
+  replay = { tl, source, live: replay?.live ?? source, p: at * tl.total, wall: performance.now(), t: tl.start, ended: false };
+  // Start from an empty canvas so every card animates in, but keep the current zoom and scroll.
+  const zoom = state.zoom;
+  reset();
+  state.firstPaint = false;
+  setZoom(zoom);
+  document.body.classList.add("replaying");
+  replayBtn.innerHTML = `<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg><span>Stop</span><span class="when"></span>`;
+  clearInterval(replayTimer);
+  replayTimer = setInterval(frame, 50); // ~20 fps is plenty for cards; a timer also keeps going headless
+  frame();
+}
+
+let replayTimer = null;
+function frame() {
+  if (!replay) return;
+  const p = position();
+  replay.t = timeAt(replay.tl, p);
+  state.tree = treeAt(replay.source, replay.t, replay.tl.now);
+  render();
+  progress.style.transform = `scaleX(${replay.tl.total ? p / replay.tl.total : 1})`;
+  replayBtn.querySelector(".when").textContent = `${clockText(p / speed)} / ${clockText(replay.tl.total / speed)}`;
+  if (p >= replay.tl.total && !replay.ended) {
+    replay.ended = true;
+    setTimeout(() => replay?.ended && stopReplay(), 1500);
+  }
+}
+
+function stopReplay() {
+  if (!replay) return;
+  const live = replay.live;
+  replay = null;
+  clearInterval(replayTimer);
+  document.body.classList.remove("replaying");
+  progress.style.transform = "scaleX(0)";
+  replayBtn.innerHTML = `<svg viewBox="0 0 16 16"><path d="M5 3.5v9l7.5-4.5z"/></svg><span>Replay</span>`;
+  state.tree = live;
+  render();
 }
 
 // ---------- zoom (ctrl/cmd + wheel, +/-/0) ----------
@@ -515,6 +623,7 @@ addEventListener("pointerup", () => {
 
 if (params.has("demo")) {
   select.hidden = true;
+  $("#replay").hidden = true;
   startDemo((tree) => {
     if (shownRoot && tree.id !== shownRoot) reset();
     shownRoot = tree.id;

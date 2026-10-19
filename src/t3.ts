@@ -34,6 +34,8 @@ export type AgentNode = {
   /** Threads only: time spent in finished runs, plus when the current run started (threads idle between turns). */
   activeMs?: number;
   runStartedAt?: string | null;
+  /** Threads only: each run's interval, used by the replay to know when the thread was working. */
+  runs?: { start: string; end: string | null }[];
   costUsd: number | null;
   tokens: number;
   usageSource: "transcript" | "context" | "none";
@@ -128,6 +130,7 @@ function threadRunState(id: string) {
     completedAt: running ? null : last.completed_at,
     activeMs,
     runStartedAt,
+    runs: rows.map((r) => ({ start: r.requested_at, end: mapStatus(r.status) === "running" ? null : r.completed_at })),
   };
 }
 
@@ -276,6 +279,7 @@ export function buildTree(rootThreadId: string): AgentNode | null {
     completedAt: run?.completedAt ?? null,
     activeMs: run?.activeMs,
     runStartedAt: run?.runStartedAt,
+    runs: run?.runs,
     costUsd: null,
     tokens: 0,
     usageSource: "none",
@@ -372,6 +376,7 @@ export function buildTree(rootThreadId: string): AgentNode | null {
         completedAt: r?.completedAt ?? null,
         activeMs: r?.activeMs,
         runStartedAt: r?.runStartedAt,
+        runs: r?.runs,
         costUsd: null,
         tokens: 0,
         usageSource: "none",

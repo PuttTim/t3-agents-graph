@@ -13,6 +13,12 @@ bun start            # -> http://localhost:4317
 - `?thread=<threadId>` pins one thread (or use the picker in the header)
 - `?demo` replays the scenario from the original clip with fake data
 
+**Replay** (or press `R`) plays the thread back from its recorded timestamps at 2x, 5x or 10x.
+Agents pop in when they started and cost grows as they run. Stretches where nothing was
+running anywhere in the tree (e.g. overnight between turns) are squeezed to 2 seconds, so a
+thread spanning a day replays in minutes. You can switch speed mid-replay. `?replay=10` starts
+one on load, and `?at=0.5` starts it halfway.
+
 Click a card to see its prompt, result, tools, tokens and cost. The `2 v` button folds
 children. Drag to pan, ctrl/cmd + scroll or `+` / `-` / `0` to zoom.
 

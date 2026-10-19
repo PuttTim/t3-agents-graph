@@ -23,6 +23,12 @@
         <select id="thread" aria-label="Thread"></select>
       </div>
       <div class="stats">
+        <div class="replay" id="replay">
+          <button id="replay-btn" class="replay-btn" title="Replay this thread's agents (R)">
+            <svg viewBox="0 0 16 16"><path d="M5 3.5v9l7.5-4.5z" /></svg><span>Replay</span>
+          </button>
+          <div class="speeds" id="speeds" role="group" aria-label="Replay speed"></div>
+        </div>
         <span id="stat-count"></span>
         <span id="stat-running" class="running"></span>
         <span id="stat-cost" class="cost"></span>
@@ -30,6 +36,7 @@
           <svg viewBox="0 0 16 16"><path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1.5v9a4.5 4.5 0 010-9z" /></svg>
         </button>
       </div>
+      <div id="replay-progress"></div>
     </header>
 
     <main id="viewport">
