@@ -22,14 +22,24 @@ when it read or waited on it (`t3_thread_read` / `t3_thread_wait`). Click a thre
 **Open thread view** to zoom into it. Replay works here too, and arcs appear when the first call
 happened.
 
-**Replay** (or press `R`) plays the thread back from its recorded timestamps at 2x, 5x or 10x.
+**Replay** (or press `R`) plays the thread back from its recorded timestamps. Choose a 2x, 10x,
+or 50x preset, or enter a custom speed from 0.1x to 1000x (10x by default; your choice is saved).
 Agents pop in when they started and cost grows as they run. Stretches where nothing was
 running anywhere in the tree (e.g. overnight between turns) are squeezed to 2 seconds, so a
 thread spanning a day replays in minutes. You can switch speed mid-replay. `?replay=10` starts
 one on load, and `?at=0.5` starts it halfway.
 
 Click a card to see its prompt, result, tools, tokens and cost. The `2 v` button folds
-children. Drag to pan, ctrl/cmd + scroll or `+` / `-` / `0` to zoom.
+children. Drag to pan, use the bottom-right zoom controls, or ctrl/cmd + scroll (trackpad pinch)
+to zoom toward the pointer. `+` / `-` zoom, `0` resets to 100%, and `F` fits the tree to the
+screen. Zoom ranges from 20% to 200%.
+
+**Export** downloads the whole displayed tree as PNG (up to 2x resolution, capped for very
+large trees), SVG, or JSON with tree data and costs. **Copy image** puts the PNG on the
+clipboard in supported browsers. Images use the current theme, layout, collapsed branches,
+and replay frame, with a title and timestamp; panning and zoom do not crop the export.
+SVG uses embedded HTML (`foreignObject`), so view it in a browser; PNG export requires a
+browser that supports rasterising it, such as Chromium.
 
 ## Where the data comes from
 

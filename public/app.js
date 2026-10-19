@@ -1,6 +1,7 @@
 import { chevron, providerIcon, statusMeta, toolBadges } from "./icons.js";
 import { startDemo } from "./demo.js";
 import { buildTimeline, timeAt, treeAt } from "./replay.js";
+import { canvasPng, canvasSvg, download, fileName, treeJson } from "./export.js";
 
 const W = 300; // keep in sync with --card-w
 const H = 136; // --card-h
@@ -394,6 +395,7 @@ function render() {
     state.refit = false;
     // Zoom out to fit wide trees (down to 50%), then centre on the root.
     setZoom(Math.max(0.5, Math.min(1, (viewport.clientWidth - 8) / width)));
+    viewport.scrollTop = 0;
     requestAnimationFrame(() => {
       const rootPos = pos.get(root.id);
       viewport.scrollLeft = (rootPos.x + W / 2) * state.zoom - viewport.clientWidth / 2;
@@ -690,31 +692,51 @@ function connect() {
 
 // ---------- replay ----------
 
-const SPEEDS = [2, 5, 10];
+const SPEEDS = [2, 10, 50];
+const validSpeed = (value) => Number.isFinite(value) && value >= 0.1 && value <= 1000;
 let replay = null; // { tl, source, live, speed, p, wall, t, ended }
-let speed = Number(params.get("replay")) || Number(localStorage.getItem("agents-replay-speed")) || 5;
-if (!SPEEDS.includes(speed)) speed = 5;
+let speed = Number(params.get("replay")) || Number(localStorage.getItem("agents-replay-speed")) || 10;
+if (!validSpeed(speed)) speed = 10;
 let autoReplay = params.has("replay"); // ?replay or ?replay=10 starts one as soon as data arrives
 const replayBtn = $("#replay-btn");
 const speedsEl = $("#speeds");
 const progress = $("#replay-progress");
 
-speedsEl.innerHTML = SPEEDS.map((x) => `<button data-speed="${x}">${x}x</button>`).join("");
-const paintSpeeds = () => speedsEl.querySelectorAll("button").forEach((b) => b.classList.toggle("on", Number(b.dataset.speed) === speed));
+speedsEl.innerHTML = SPEEDS.map((x) => `<button data-speed="${x}">${x}x</button>`).join("") +
+  `<label class="custom-speed"><input id="replay-speed" type="number" min="0.1" max="1000" step="any" aria-label="Custom replay speed" title="Replay speed (0.1–1000x)" />x</label>`;
+const speedInput = $("#replay-speed");
+const paintSpeeds = () => {
+  speedsEl.querySelectorAll("button").forEach((b) => {
+    const active = Number(b.dataset.speed) === speed;
+    b.classList.toggle("on", active);
+    b.setAttribute("aria-pressed", active);
+  });
+  speedInput.value = speed;
+};
 paintSpeeds();
 
-speedsEl.addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (!b) return;
+function changeSpeed(next) {
+  if (!validSpeed(next)) {
+    paintSpeeds();
+    return;
+  }
   if (replay) {
     // Re-anchor so changing speed mid-replay doesn't jump.
     replay.p = position();
     replay.wall = performance.now();
   }
-  speed = Number(b.dataset.speed);
+  speed = next;
   localStorage.setItem("agents-replay-speed", speed);
   paintSpeeds();
   if (!replay) startReplay();
+}
+speedsEl.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-speed]");
+  if (b) changeSpeed(Number(b.dataset.speed));
+});
+speedInput.addEventListener("change", () => changeSpeed(Number(speedInput.value)));
+speedInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") speedInput.blur();
 });
 
 replayBtn.onclick = () => (replay ? stopReplay() : startReplay());
@@ -777,27 +799,121 @@ function stopReplay() {
   render();
 }
 
-// ---------- zoom (ctrl/cmd + wheel, +/-/0) ----------
+// ---------- zoom (buttons, ctrl/cmd + wheel or pinch, +/-/0/F) ----------
 
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 2;
 state.zoom = 1;
-function setZoom(z) {
-  state.zoom = Math.round(Math.max(0.3, Math.min(1.6, z)) * 100) / 100;
-  canvas.style.zoom = state.zoom;
+
+/** Zoom keeping the content under (clientX, clientY) still; defaults to the middle of the view. */
+function setZoom(z, clientX, clientY) {
+  const next = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) * 100) / 100;
+  const vr = viewport.getBoundingClientRect();
+  const ax = clientX ?? vr.left + vr.width / 2;
+  const ay = clientY ?? vr.top + vr.height / 2;
+  const before = canvas.getBoundingClientRect();
+  const cx = (ax - before.left) / state.zoom;
+  const cy = (ay - before.top) / state.zoom;
+  state.zoom = next;
+  canvas.style.zoom = next;
+  const after = canvas.getBoundingClientRect();
+  viewport.scrollLeft += after.left + cx * next - ax;
+  viewport.scrollTop += after.top + cy * next - ay;
+  $("#zoom-level").textContent = `${Math.round(next * 100)}%`;
 }
+
+/** Fit the whole tree in view (never above 100%). */
+function fitZoom() {
+  const w = parseFloat(canvas.style.width) || 1;
+  const h = parseFloat(canvas.style.height) || 1;
+  const z = Math.min(1, (viewport.clientWidth - 16) / w, (viewport.clientHeight - 16) / h);
+  setZoom(Math.max(ZOOM_MIN, Math.floor(z * 100) / 100));
+  viewport.scrollLeft = (viewport.scrollWidth - viewport.clientWidth) / 2;
+  viewport.scrollTop = 0;
+}
+
 viewport.addEventListener(
   "wheel",
   (e) => {
-    if (!e.ctrlKey && !e.metaKey) return;
+    if (!e.ctrlKey && !e.metaKey) return; // trackpad pinch arrives as ctrl+wheel
     e.preventDefault();
-    setZoom(state.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08));
+    setZoom(state.zoom * Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.002)), e.clientX, e.clientY);
   },
   { passive: false },
 );
+$("#zoom-in").onclick = () => setZoom(state.zoom * 1.2);
+$("#zoom-out").onclick = () => setZoom(state.zoom / 1.2);
+$("#zoom-level").onclick = () => setZoom(1);
+$("#zoom-fit").onclick = fitZoom;
 addEventListener("keydown", (e) => {
-  if (e.target.closest?.("select, input")) return;
-  if (e.key === "=" || e.key === "+") setZoom(state.zoom * 1.1);
-  else if (e.key === "-") setZoom(state.zoom / 1.1);
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.("select, input")) return;
+  if (e.key === "=" || e.key === "+") setZoom(state.zoom * 1.2);
+  else if (e.key === "-") setZoom(state.zoom / 1.2);
   else if (e.key === "0") setZoom(1);
+  else if (e.key.toLowerCase() === "f") fitZoom();
+});
+
+// ---------- export ----------
+
+const exportBtn = $("#export-btn");
+const exportMenu = $("#export-menu");
+exportBtn.onclick = (e) => {
+  e.stopPropagation();
+  toggleExport(!exportMenu.hidden);
+};
+function toggleExport(hidden) {
+  exportMenu.hidden = hidden;
+  exportBtn.setAttribute("aria-expanded", !hidden);
+}
+addEventListener("click", (e) => !e.target.closest("#export") && toggleExport(true));
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !exportMenu.hidden) {
+    toggleExport(true);
+    exportBtn.focus();
+  }
+});
+
+function exportMeta() {
+  const root = state.tree;
+  let agents = 0;
+  walk(root, () => agents++);
+  const cost = root._total?.priced ? ` · ${money(root._total.cost)}` : "";
+  const when = replay ? `replay at ${new Date(replay.t).toLocaleString()}` : new Date().toLocaleString();
+  return { title: root.name, subtitle: `${agents} agent${agents === 1 ? "" : "s"}${cost} · ${when}` };
+}
+
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => (t.hidden = true), 3500);
+}
+
+exportMenu.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-format]");
+  if (!b || !state.tree) return;
+  toggleExport(true);
+  const meta = exportMeta();
+  try {
+    if (b.dataset.format === "png") download(await canvasPng(canvas, meta), fileName(meta.title, "png"));
+    else if (b.dataset.format === "svg") {
+      const { svg } = await canvasSvg(canvas, meta);
+      download(new Blob([svg], { type: "image/svg+xml" }), fileName(meta.title, "svg"));
+    } else if (b.dataset.format === "copy") {
+      const png = canvasPng(canvas, meta);
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+      toast("Image copied");
+    } else {
+      const view = state.projectId ? { project: state.projectId } : { thread: shownRoot };
+      download(treeJson(state.tree, { ...view, machine: state.shownEnv, replayAt: replay ? new Date(replay.t).toISOString() : null }), fileName(meta.title, "json"));
+    }
+  } catch (err) {
+    console.error(err);
+    // Safari refuses to rasterise foreignObject; the SVG still works there.
+    toast(b.dataset.format === "copy" ? "Couldn't copy the image. Try downloading PNG instead." :
+      b.dataset.format === "png" ? "This browser can't make a PNG of the tree. Try SVG instead." : `Export failed: ${err.message}`);
+  }
 });
 
 // ---------- drag to pan ----------

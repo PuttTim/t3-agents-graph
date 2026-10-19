@@ -44,6 +44,17 @@
         <span id="stat-count"></span>
         <span id="stat-running" class="running"></span>
         <span id="stat-cost" class="cost"></span>
+        <div class="export" id="export">
+          <button id="export-btn" class="replay-btn" title="Download or copy this view" aria-expanded="false" aria-controls="export-menu">
+            <svg viewBox="0 0 16 16"><path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 12.5v1h11v-1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg><span>Export</span>
+          </button>
+          <div class="menu" id="export-menu" hidden>
+            <button data-format="png">PNG image <small>2x</small></button>
+            <button data-format="svg">SVG image <small>vector</small></button>
+            <button data-format="copy">Copy image <small>clipboard</small></button>
+            <button data-format="json">JSON data <small>tree + costs</small></button>
+          </div>
+        </div>
         <button id="theme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
           <svg viewBox="0 0 16 16"><path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1.5v9a4.5 4.5 0 010-9z" /></svg>
         </button>
@@ -57,6 +68,14 @@
       </div>
       <div id="empty" hidden></div>
     </main>
+
+    <div class="zoombar" role="group" aria-label="Zoom">
+      <button id="zoom-out" title="Zoom out (-)" aria-label="Zoom out"><svg viewBox="0 0 16 16"><path d="M3.5 8h9" /></svg></button>
+      <button id="zoom-level" title="Reset to 100% (0)">100%</button>
+      <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in"><svg viewBox="0 0 16 16"><path d="M3.5 8h9M8 3.5v9" /></svg></button>
+      <button id="zoom-fit" title="Fit to screen (F)" aria-label="Fit to screen"><svg viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" /></svg></button>
+    </div>
+    <div id="toast" hidden></div>
 
     <aside id="drawer" hidden>
       <button class="icon-btn close" id="drawer-close" aria-label="Close">
