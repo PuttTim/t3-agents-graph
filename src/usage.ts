@@ -100,18 +100,23 @@ function cached(path: string, parse: (text: string) => Usage): Usage {
 }
 
 function parseClaude(text: string): Usage {
+  const entries: any[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.includes('"assistant"')) continue;
+    try {
+      entries.push(JSON.parse(line));
+    } catch {}
+  }
+  return claudeUsage(entries);
+}
+
+/** Usage from parsed Claude transcript lines (Conductor stores the same SDK messages per row). */
+export function claudeUsage(entries: any[]): Usage {
   // One assistant message is split over several lines (one per content block)
   // that repeat the same usage, so dedupe on message.id.
   const byMsg = new Map<string, { model: string; u: any }>();
   const tools: string[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.includes('"assistant"')) continue;
-    let d;
-    try {
-      d = JSON.parse(line);
-    } catch {
-      continue;
-    }
+  for (const d of entries) {
     const msg = d?.message;
     if (d?.type !== "assistant" || !msg?.usage) continue;
     byMsg.set(msg.id ?? d.uuid, { model: msg.model, u: msg.usage });
