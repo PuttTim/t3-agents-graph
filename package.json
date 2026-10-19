@@ -1,0 +1,12 @@
+{
+  "name": "t3-agents-graph",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun server.ts",
+    "dev": "bun --watch server.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
