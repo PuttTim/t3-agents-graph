@@ -23,12 +23,16 @@ const state = {
   threads: [],
   threadId: params.get("thread") ?? "",
   env: params.get("env") ?? "",
+  projectId: params.get("project") ?? "",
+  groupBy: localStorage.getItem("agents-group-by") ?? "project",
+  layout: localStorage.getItem("agents-layout") ?? "horizontal",
   envs: [],
   collapsed: new Set(),
   selected: null,
   cards: new Map(),
   wireEls: new Map(),
   dotEls: new Map(),
+  commEls: new Map(),
   firstPaint: true,
 };
 
@@ -80,6 +84,13 @@ function duration(node, now = clock()) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/** " · 45s" after the cost, or just "45s" when there's no cost to separate it from. */
+function footDuration(n) {
+  const d = duration(n);
+  const t = n._total;
+  return d && (t.priced || t.tok) ? ` · ${d}` : d;
+}
+
 const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`) + " tok";
 
 /** Cost of a node including everything it started (like the original: parent cost rolls up). */
@@ -108,10 +119,48 @@ function walk(node, f, depth = 0, parent = null) {
 // ---------- layout ----------
 // Root on top, its children side by side, everything deeper stacks downward in an indented list.
 
+const visibleKids = (n) => (state.collapsed.has(n.id) ? [] : n.children);
+
 function layout(root) {
+  return state.layout === "vertical" ? layoutStacked(root) : layoutSpread(root);
+}
+
+// Horizontal: every level side by side, each parent centred over its children (an org chart).
+function layoutSpread(root) {
   const pos = new Map();
   const links = [];
-  const visibleKids = (n) => (state.collapsed.has(n.id) ? [] : n.children);
+  const widthOf = new Map();
+  const measure = (n) => {
+    const ks = visibleKids(n);
+    const inner = ks.reduce((s, k) => s + measure(k), 0) + COL_GAP * Math.max(0, ks.length - 1);
+    const w = Math.max(W, inner);
+    widthOf.set(n.id, w);
+    return w;
+  };
+  const total = measure(root);
+  let maxY = 0;
+  const place = (n, x0, depth) => {
+    const w = widthOf.get(n.id);
+    const y = PAD + depth * (H + ROW_GAP);
+    pos.set(n.id, { x: x0 + (w - W) / 2, y });
+    maxY = Math.max(maxY, y + H);
+    const ks = visibleKids(n);
+    const inner = ks.reduce((s, k) => s + widthOf.get(k.id), 0) + COL_GAP * Math.max(0, ks.length - 1);
+    let x = x0 + (w - inner) / 2;
+    for (const k of ks) {
+      place(k, x, depth + 1);
+      links.push({ id: `${n.id}->${k.id}`, from: n, to: k, top: true });
+      x += widthOf.get(k.id) + COL_GAP;
+    }
+  };
+  place(root, PAD, 0);
+  return { pos, links, width: total + PAD * 2, height: maxY + PAD };
+}
+
+// Vertical (as in the original clip): root's children side by side, everything deeper stacked and indented.
+function layoutStacked(root) {
+  const pos = new Map();
+  const links = [];
 
   const cols = visibleKids(root).map((child) => {
     const items = [];
@@ -218,7 +267,7 @@ function updateCard(el, node, p) {
   el.classList.toggle("selected", state.selected === node.id);
   setHTML(el, ".tile", providerIcon(node.provider, node.model));
   setText(el, ".name", node.name);
-  setText(el, ".model", modelLabel(node.model, node.provider));
+  setText(el, ".model", node.origin === "project" ? node.model ?? "" : modelLabel(node.model, node.provider));
   const st = statusMeta[node.status] ?? statusMeta.done;
   const pill = el.querySelector(".pill");
   if (pill.className !== `pill ${node.status}`) pill.className = `pill ${node.status}`;
@@ -228,7 +277,7 @@ function updateCard(el, node, p) {
   setAttr(el.querySelector(".task"), "title", node.prompt ?? node.task);
   const t = node._total;
   setText(el, ".cost", t.priced ? money(t.cost) : t.tok ? tokens(t.tok) : "");
-  setText(el, ".dur", (t.priced || t.tok ? " · " : "") + duration(node));
+  setText(el, ".dur", footDuration(node));
   const kids = el.querySelector(".kids");
   kids.hidden = node.children.length === 0;
   kids.classList.toggle("collapsed", state.collapsed.has(node.id));
@@ -244,18 +293,22 @@ function render() {
     wires.innerHTML = "";
     state.wireEls.clear();
     state.dotEls.clear();
+  state.commEls.clear();
     $("#empty").innerHTML = state.threads.length
       ? "No thread selected."
       : "No T3 Code threads found.<br><code>Looking in ~/.t3/userdata/statev2.sqlite</code>";
     return;
   }
 
+  // A project card is running while any of its threads is.
+  if (root.origin === "project") root.status = root.children.some((c) => c.status === "running") ? "running" : "done";
   rollup(root);
   // A replay lays out the finished tree so cards appear in their final spot instead of reflowing.
   const full = layout(replay ? replay.source : root);
   const shown = new Set();
   walk(root, (n) => shown.add(n.id));
-  const { pos, width, height } = full;
+  const { pos, height } = full;
+  const width = full.width + (root.links?.length ? 90 : 0); // room for link arcs bulging right
   const links = full.links.filter((l) => shown.has(l.from.id) && shown.has(l.to.id));
   if (canvas.style.width !== `${width}px`) canvas.style.width = `${width}px`;
   if (canvas.style.height !== `${height}px`) canvas.style.height = `${height}px`;
@@ -318,9 +371,11 @@ function render() {
       wires.appendChild(c);
       state.dotEls.set(id, c);
     }
-    setAttr(c, "cx", id === root.id ? p.x + W / 2 : p.x + ELBOW_X);
+    setAttr(c, "cx", id === root.id || state.layout !== "vertical" ? p.x + W / 2 : p.x + ELBOW_X);
     setAttr(c, "cy", p.y + H);
   }
+
+  renderComm(root, pos, shown);
 
   // header
   let count = 0;
@@ -334,8 +389,9 @@ function render() {
   $("#stat-cost").textContent = root._total.priced ? money(root._total.cost) : root._total.tok ? tokens(root._total.tok) : "";
   document.title = running ? `(${running}) Agents · ${root.name}` : `Agents · ${root.name}`;
 
-  if (state.firstPaint) {
+  if (state.firstPaint || state.refit) {
     state.firstPaint = false;
+    state.refit = false;
     // Zoom out to fit wide trees (down to 50%), then centre on the root.
     setZoom(Math.max(0.5, Math.min(1, (viewport.clientWidth - 8) / width)));
     requestAnimationFrame(() => {
@@ -346,13 +402,93 @@ function render() {
   if (state.selected) renderDrawer();
 }
 
+// ---------- thread-to-thread links (project view) ----------
+
+const COMM_LABEL = { message: "messaged", read: "read" };
+
+function commPath(a, b, i, rightEdge) {
+  const ay = a.y + H / 2;
+  const by = b.y + H / 2;
+  if (Math.abs(a.x - b.x) < W) {
+    // Same column: bulge out past every card between the two (indented ones stick out further).
+    const ax = a.x + W;
+    const bx = b.x + W;
+    const x = rightEdge(Math.min(a.y, b.y), Math.max(a.y, b.y) + H) + 28 + i * 26;
+    // A cubic only reaches ~3/4 of the way to its control points, so push them out to clear the edge.
+    const cx = Math.max(ax, bx) + (x - Math.max(ax, bx)) * 1.34;
+    return { d: `M${ax},${ay} C${cx},${ay} ${cx},${by} ${bx},${by}`, lx: x, ly: (ay + by) / 2 + i * 20 };
+  }
+  // Different columns: leave the caller's side, run across, then turn down into the target's top
+  // (or up into its bottom), so the arc travels through the gaps between rows.
+  const right = b.x > a.x;
+  const sx = right ? a.x + W : a.x;
+  const sy = ay + i * 16;
+  const below = b.y > a.y;
+  const ex = b.x + W / 2 + (right ? -1 : 1) * (W / 4 - i * 18);
+  const ey = below ? b.y : b.y + H;
+  return {
+    d: `M${sx},${sy} C${ex},${sy} ${ex},${sy} ${ex},${ey}`,
+    lx: (sx + ex) / 2,
+    ly: sy - 6,
+  };
+}
+
+function renderComm(root, pos, shown) {
+  if (!wires.querySelector("defs")) {
+    wires.insertAdjacentHTML(
+      "afterbegin",
+      `<defs>${Object.keys(COMM_LABEL)
+        .map((k) => `<marker id="arrow-${k}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0.5 L7.5,4 L0,7.5z" class="arrow ${k}"/></marker>`)
+        .join("")}</defs>`,
+    );
+  }
+  const links = (root.links ?? []).filter(
+    (l) => shown.has(l.from) && shown.has(l.to) && pos.has(l.from) && pos.has(l.to) && (!replay || Date.parse(l.at) <= replay.t),
+  );
+  // Rightmost card edge within a vertical band, so same-column arcs clear everything in between.
+  const boxes = [...shown].map((id) => pos.get(id)).filter(Boolean);
+  const rightEdge = (y0, y1) => Math.max(...boxes.filter((p) => p.y < y1 && p.y + H > y0).map((p) => p.x + W));
+  const seen = new Set();
+  const pairIndex = new Map();
+  for (const l of links) {
+    const id = `${l.from}~${l.to}~${l.kind}`;
+    seen.add(id);
+    const pair = [l.from, l.to].sort().join("~");
+    const i = pairIndex.get(pair) ?? 0;
+    pairIndex.set(pair, i + 1);
+    const { d, lx, ly } = commPath(pos.get(l.from), pos.get(l.to), i, rightEdge);
+    let g = state.commEls.get(id);
+    if (!g) {
+      g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("class", `comm ${l.kind}`);
+      g.innerHTML = `<title></title><path marker-end="url(#arrow-${l.kind})"/><text></text>`;
+      wires.appendChild(g);
+      state.commEls.set(id, g);
+    }
+    setAttr(g.querySelector("path"), "d", d);
+    const text = g.querySelector("text");
+    setAttr(text, "x", lx);
+    setAttr(text, "y", ly - 4);
+    const label = `${COMM_LABEL[l.kind]} ${l.count}×`;
+    if (text.textContent !== label) text.textContent = label;
+    const title = `${findNode(l.from)?.name} ${COMM_LABEL[l.kind]} ${findNode(l.to)?.name} ${l.count} time${l.count === 1 ? "" : "s"}`;
+    if (g.querySelector("title").textContent !== title) g.querySelector("title").textContent = title;
+  }
+  for (const [id, g] of state.commEls) {
+    if (!seen.has(id)) {
+      g.remove();
+      state.commEls.delete(id);
+    }
+  }
+}
+
 // Durations tick without waiting for the server.
 setInterval(() => {
   if (!state.tree) return;
   walk(state.tree, (n) => {
     if (n.status !== "running") return;
     const el = state.cards.get(n.id);
-    if (el) setText(el, ".dur", (n._total.priced || n._total.tok ? " · " : "") + duration(n));
+    if (el) setText(el, ".dur", footDuration(n));
   });
 }, 1000);
 
@@ -370,6 +506,11 @@ function openDrawer(id) {
   render();
 }
 
+$("#drawer-body").addEventListener("click", (e) => {
+  const b = e.target.closest(".open-thread");
+  if (b) navigate({ env: state.shownEnv === "local" ? "" : state.shownEnv, threadId: b.dataset.thread });
+});
+
 $("#drawer-close").onclick = () => {
   state.selected = null;
   $("#drawer").hidden = true;
@@ -382,7 +523,7 @@ function renderDrawer() {
   if (!n) return $("#drawer-close").click();
   const own = n.costUsd != null ? money(n.costUsd) : "n/a";
   const src = { transcript: "harness transcript", context: "T3 context snapshot", none: "unavailable" }[n.usageSource] ?? "";
-  const origin = { root: "Thread", provider_native: "Native subagent", app_owned: "T3 delegate_task", thread: "Launched thread" }[n.origin] ?? n.origin;
+  const origin = { project: "T3 project", root: "Thread", provider_native: "Native subagent", app_owned: "T3 delegate_task", thread: "Launched thread" }[n.origin] ?? n.origin;
   const html = `
     <h2>${esc(n.name)}</h2>
     <div class="meta">${esc(modelLabel(n.model, n.provider))} · ${esc(statusMeta[n.status]?.label ?? n.status)} · ${duration(n)}</div>
@@ -395,6 +536,7 @@ function renderDrawer() {
       ${state.envs.length > 1 ? `<dt>Machine</dt><dd>${esc(state.envs.find((e) => e.id === state.shownEnv)?.name ?? state.shownEnv)}</dd>` : ""}
       ${n.threadId ? `<dt>Thread</dt><dd>${esc(n.threadId)}</dd>` : ""}
     </dl>
+    ${state.projectId && n.threadId ? `<button class="open-thread" data-thread="${esc(n.threadId)}">Open thread view</button>` : ""}
     ${n.tools.length ? `<h3>Tools</h3><div class="chips">${n.tools.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : ""}
     ${n.prompt ? `<h3>Prompt</h3><pre>${esc(n.prompt)}</pre>` : ""}
     ${n.result ? `<h3>Result</h3><pre>${esc(n.result)}</pre>` : ""}`;
@@ -408,35 +550,88 @@ function renderDrawer() {
 // ---------- thread picker ----------
 
 function renderThreads() {
-  const option = (t) =>
-    `<option value="${esc(t.env)}|${esc(t.threadId)}">${t.running ? "● " : ""}${esc(t.title)}${t.agents ? ` (${t.agents})` : ""}</option>`;
+  const multi = state.envs.length > 1;
+  const envName = (id) => state.envs.find((e) => e.id === id)?.name ?? id;
+  const threadOpt = (t) =>
+    `<option value="t|${esc(t.env)}|${esc(t.threadId)}">${t.running ? "● " : ""}${esc(t.title)}${t.agents ? ` (${t.agents})` : ""}</option>`;
   let html = `<option value="">Latest active thread</option>`;
-  if (state.envs.length > 1) {
+
+  if (state.groupBy === "project") {
+    // One group per T3 project (a directory, worktrees included); its first entry opens the project view.
+    const groups = new Map();
+    for (const t of state.threads) {
+      const key = `${t.env}|${t.projectId}`;
+      if (!groups.has(key)) groups.set(key, { env: t.env, projectId: t.projectId, name: t.project, threads: [] });
+      groups.get(key).threads.push(t);
+    }
+    for (const g of groups.values()) {
+      const label = multi ? `${g.name} · ${envName(g.env)}` : g.name;
+      const running = g.threads.some((t) => t.running);
+      html += `<optgroup label="${esc(label)}">`;
+      html += `<option value="p|${esc(g.env)}|${esc(g.projectId)}">${running ? "● " : ""}◆ All threads in ${esc(g.name)}</option>`;
+      html += g.threads.map(threadOpt).join("") + `</optgroup>`;
+    }
+  } else if (multi) {
     // One group per machine, so threads from T3 Connect environments are easy to tell apart.
     for (const e of state.envs) {
       const list = state.threads.filter((t) => t.env === e.id);
       const label = e.error ? `${e.name} (offline)` : e.name;
-      html += `<optgroup label="${esc(label)}">${list.map(option).join("") || `<option disabled>No threads</option>`}</optgroup>`;
+      html += `<optgroup label="${esc(label)}">${list.map(threadOpt).join("") || `<option disabled>No threads</option>`}</optgroup>`;
     }
-  } else html += state.threads.map(option).join("");
+  } else html += state.threads.map(threadOpt).join("");
+
+  for (const e of state.envs.filter((e) => e.error && state.groupBy === "project")) {
+    html += `<optgroup label="${esc(e.name)} (offline)"><option disabled>Can't reach this machine</option></optgroup>`;
+  }
   if (select._html !== html) {
     select.innerHTML = html;
     select._html = html;
   }
-  select.value = state.threadId ? `${state.env || "local"}|${state.threadId}` : "";
+  const env = state.env || "local";
+  select.value = state.projectId ? `p|${env}|${state.projectId}` : state.threadId ? `t|${env}|${state.threadId}` : "";
 }
 
-select.onchange = () => {
+function navigate({ env = "", threadId = "", projectId = "" }) {
   stopReplay();
-  const [env, threadId] = select.value ? select.value.split(/\|(.*)/s) : ["", ""];
-  state.env = env;
-  state.threadId = threadId;
+  Object.assign(state, { env, threadId, projectId });
   const u = new URL(location.href);
-  for (const [k, v] of [["env", env && env !== "local" ? env : ""], ["thread", threadId]]) v ? u.searchParams.set(k, v) : u.searchParams.delete(k);
+  const set = { env: env && env !== "local" ? env : "", thread: threadId, project: projectId };
+  for (const [k, v] of Object.entries(set)) v ? u.searchParams.set(k, v) : u.searchParams.delete(k);
   history.replaceState(null, "", u);
   reset();
   connect();
+}
+
+select.onchange = () => {
+  if (!select.value) return navigate({});
+  const [kind, env, id] = select.value.split(/\|([^|]*)\|(.*)/s);
+  navigate(kind === "p" ? { env, projectId: id } : { env, threadId: id });
 };
+
+const layoutEl = $("#layout");
+const paintLayout = () => layoutEl.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.l === state.layout));
+paintLayout();
+layoutEl.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.dataset.l === state.layout) return;
+  state.layout = b.dataset.l;
+  localStorage.setItem("agents-layout", state.layout);
+  paintLayout();
+  state.refit = true; // re-zoom to fit the new shape
+  render();
+});
+
+const groupEl = $("#group-by");
+const paintGroup = () => groupEl.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.g === state.groupBy));
+paintGroup();
+groupEl.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  state.groupBy = b.dataset.g;
+  localStorage.setItem("agents-group-by", state.groupBy);
+  paintGroup();
+  renderThreads();
+});
 
 function reset() {
   state.firstPaint = true;
@@ -448,6 +643,7 @@ function reset() {
   wires.innerHTML = "";
   state.wireEls.clear();
   state.dotEls.clear();
+  state.commEls.clear();
 }
 
 // ---------- data ----------
@@ -484,7 +680,8 @@ function accept(snap) {
 function connect() {
   source?.close();
   const q = new URLSearchParams();
-  if (state.threadId) q.set("thread", state.threadId);
+  if (state.projectId) q.set("project", state.projectId);
+  else if (state.threadId) q.set("thread", state.threadId);
   if (state.env && state.env !== "local") q.set("env", state.env);
   if (params.get("token")) q.set("token", params.get("token"));
   source = new EventSource(`/api/stream?${q}`);

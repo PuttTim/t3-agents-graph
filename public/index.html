@@ -21,6 +21,18 @@
         </svg>
         <span>Agents</span>
         <select id="thread" aria-label="Thread"></select>
+        <div class="speeds layout" id="layout" role="group" aria-label="Layout">
+          <button data-l="horizontal" title="Horizontal: children side by side at every level">
+            <svg viewBox="0 0 16 16"><rect x="6" y="1.5" width="4" height="3" rx=".8"/><rect x="1" y="11.5" width="4" height="3" rx=".8"/><rect x="6" y="11.5" width="4" height="3" rx=".8"/><rect x="11" y="11.5" width="4" height="3" rx=".8"/><path d="M8 4.5v3.5M3 11.5V8h10v3.5M8 8v3.5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+          </button>
+          <button data-l="vertical" title="Vertical: deeper agents stacked under their parent">
+            <svg viewBox="0 0 16 16"><rect x="1" y="1" width="5" height="3" rx=".8"/><rect x="6" y="6.5" width="8" height="3" rx=".8"/><rect x="6" y="12" width="8" height="3" rx=".8"/><path d="M3 4v9.5h3M3 8h3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+          </button>
+        </div>
+        <div class="speeds group-by" id="group-by" role="group" aria-label="Group threads by">
+          <button data-g="project" title="Group threads by T3 project (directory)">Project</button>
+          <button data-g="machine" title="Group threads by machine">Machine</button>
+        </div>
       </div>
       <div class="stats">
         <div class="replay" id="replay">

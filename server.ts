@@ -1,5 +1,5 @@
-import { buildTree, defaultThreadId, listThreads } from "./src/t3";
-import { loadRemotes, remoteThreads, remoteTree } from "./src/remotes";
+import { buildProject, buildTree, defaultThreadId, listThreads } from "./src/t3";
+import { loadRemotes, remoteProject, remoteThreads, remoteTree } from "./src/remotes";
 import { hostname } from "node:os";
 import { join } from "node:path";
 
@@ -24,7 +24,7 @@ function authorized(req: Request, url: URL) {
 
 type Env = { id: string; name: string; error: string | null };
 
-async function snapshot(envId: string | null, threadId: string | null) {
+async function snapshot(envId: string | null, threadId: string | null, projectId: string | null = null) {
   const lists = await Promise.all(remotes.map(remoteThreads));
   const envs: Env[] = [{ id: "local", name: LOCAL_NAME, error: null }].concat(
     lists.map((l) => ({ id: l.remote.name, name: l.remote.name, error: l.error })),
@@ -34,6 +34,20 @@ async function snapshot(envId: string | null, threadId: string | null) {
 
   let env = envId || "local";
   let id = threadId;
+  if (projectId) {
+    const remote = remotes.find((r) => r.name === env);
+    let tree = null;
+    let error: string | null = null;
+    if (env !== "local" && !remote) error = `Unknown machine "${env}"`;
+    else
+      try {
+        tree = remote ? await remoteProject(remote, projectId) : buildProject(projectId);
+        if (!tree) error = "Project not found";
+      } catch (e) {
+        error = String((e as Error).message ?? e);
+      }
+    return { env, threadId: null, projectId, tree, threads, envs, error };
+  }
   if (!id) {
     // "Latest active": newest running thread with agents on any machine, else the local default.
     const live = threads.filter((t) => t.running && t.agents).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
@@ -54,7 +68,7 @@ async function snapshot(envId: string | null, threadId: string | null) {
       }
     } else tree = buildTree(id);
   }
-  return { env, threadId: id, tree, threads, envs, error };
+  return { env, threadId: id, projectId: null, tree, threads, envs, error };
 }
 
 const server = Bun.serve({
@@ -67,6 +81,10 @@ const server = Bun.serve({
 
     // What other machines read from this one (no federation, so no loops).
     if (url.pathname === "/api/local/threads") return json(listThreads());
+    if (url.pathname === "/api/local/project") {
+      const id = url.searchParams.get("id");
+      return json(id ? buildProject(id) : null);
+    }
     if (url.pathname === "/api/local/tree") {
       const id = url.searchParams.get("thread");
       return json(id ? buildTree(id) : null);
@@ -74,7 +92,8 @@ const server = Bun.serve({
 
     if (url.pathname === "/api/tree") {
       try {
-        return json(await snapshot(url.searchParams.get("env"), url.searchParams.get("thread")));
+        const q = url.searchParams;
+        return json(await snapshot(q.get("env"), q.get("thread"), q.get("project")));
       } catch (e) {
         return json({ error: String(e) }, 500);
       }
@@ -84,6 +103,7 @@ const server = Bun.serve({
     if (url.pathname === "/api/stream") {
       const env = url.searchParams.get("env");
       const thread = url.searchParams.get("thread");
+      const project = url.searchParams.get("project");
       let timer: Timer;
       let closed = false;
       const stream = new ReadableStream({
@@ -95,7 +115,7 @@ const server = Bun.serve({
             if (busy || closed) return;
             busy = true;
             try {
-              const body = JSON.stringify(await snapshot(env, thread));
+              const body = JSON.stringify(await snapshot(env, thread, project));
               if (closed) return;
               if (body !== last) {
                 last = body;

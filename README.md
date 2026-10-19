@@ -13,6 +13,15 @@ bun start            # -> http://localhost:4317
 - `?thread=<threadId>` pins one thread (or use the picker in the header)
 - `?demo` replays the scenario from the original clip with fake data
 
+The **Project / Machine** toggle sets how the picker groups threads. In Project mode each T3
+project (a directory, worktrees included) is a group, and its first entry, **All threads in
+<project>**, opens the project view (`?project=<projectId>`). That view puts a project card on
+top with every top-level thread under it (12 most recent) and their agents below. Dashed arcs
+show threads talking to each other: orange when one messaged another (`t3_thread_send`), purple
+when it read or waited on it (`t3_thread_read` / `t3_thread_wait`). Click a thread card, then
+**Open thread view** to zoom into it. Replay works here too, and arcs appear when the first call
+happened.
+
 **Replay** (or press `R`) plays the thread back from its recorded timestamps at 2x, 5x or 10x.
 Agents pop in when they started and cost grows as they run. Stretches where nothing was
 running anywhere in the tree (e.g. overnight between turns) are squeezed to 2 seconds, so a

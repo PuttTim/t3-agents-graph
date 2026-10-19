@@ -21,7 +21,7 @@ export type AgentNode = {
   id: string;
   threadId: string | null;
   parentId: string | null;
-  origin: "root" | "provider_native" | "app_owned" | "thread";
+  origin: "root" | "provider_native" | "app_owned" | "thread" | "project";
   provider: string; // claudeAgent | codex | opencode | cursor | ...
   name: string;
   model: string | null;
@@ -41,6 +41,16 @@ export type AgentNode = {
   usageSource: "transcript" | "context" | "none";
   tools: string[];
   children: AgentNode[];
+  /** Project view only: thread-to-thread calls (t3_thread_send / read / wait) between cards. */
+  links?: ThreadLink[];
+};
+
+export type ThreadLink = {
+  from: string; // node id of the caller
+  to: string; // node id of the thread it talked to
+  kind: "message" | "read";
+  count: number;
+  at: string; // first call, so a replay can draw the link when it happened
 };
 
 export type ThreadSummary = {
@@ -50,6 +60,9 @@ export type ThreadSummary = {
   updatedAt: string;
   agents: number;
   running: boolean;
+  projectId: string;
+  project: string;
+  workspaceRoot: string | null;
 };
 
 const parse = (s: string | null) => {
@@ -134,6 +147,12 @@ function threadRunState(id: string) {
   };
 }
 
+function legacyRun(id: string) {
+  const span = legacySpan(id);
+  if (!span) return null;
+  return { status: "done" as Status, ...span, runStartedAt: null, runs: [{ start: span.startedAt, end: span.completedAt }] };
+}
+
 function firstUserMessage(id: string): string | null {
   const row = conn()
     .query(
@@ -141,7 +160,11 @@ function firstUserMessage(id: string): string | null {
        where thread_id = ? and type = 'user_message' order by ordinal limit 1`,
     )
     .get(id) as { text: string } | null;
-  return row?.text ?? null;
+  if (row?.text) return row.text;
+  const legacy = conn()
+    .query(`select text from projection_thread_messages where thread_id = ? and role = 'user' order by created_at limit 1`)
+    .get(id) as { text: string } | null;
+  return legacy?.text ?? null;
 }
 
 function nativeThreadRefs(threadId: string): NativeRef[] {
@@ -152,7 +175,30 @@ function nativeThreadRefs(threadId: string): NativeRef[] {
        from orchestration_v2_projection_provider_threads where thread_id = ?`,
     )
     .all(threadId) as { driver: string; id: string }[];
-  return rows.filter((r) => r.driver && r.id && !r.id.startsWith("pending")).map((r) => ({ driver: r.driver, kind: "thread", id: r.id }));
+  const refs: NativeRef[] = rows
+    .filter((r) => r.driver && r.id && !r.id.startsWith("pending"))
+    .map((r) => ({ driver: r.driver, kind: "thread", id: r.id }));
+  return refs.length ? refs : legacyThreadRefs(threadId);
+}
+
+/** Threads imported from T3's v1 store only keep their native id in the session's resume cursor. */
+function legacyThreadRefs(threadId: string): NativeRef[] {
+  const row = conn()
+    .query(`select provider_name, resume_cursor_json from provider_session_runtime where thread_id = ?`)
+    .get(threadId) as { provider_name: string; resume_cursor_json: string | null } | null;
+  if (!row?.resume_cursor_json) return [];
+  const cursor = parse(row.resume_cursor_json);
+  const driver = /claude/i.test(row.provider_name) ? "claudeAgent" : row.provider_name;
+  const id = cursor.threadId ?? cursor.sessionId ?? cursor.resume ?? cursor.session_id;
+  return typeof id === "string" ? [{ driver, kind: "thread", id }] : [];
+}
+
+/** v1 threads have no runs; their first and last message bound how long they ran. */
+function legacySpan(threadId: string) {
+  const row = conn()
+    .query(`select min(created_at) as a, max(updated_at) as b from projection_thread_messages where thread_id = ?`)
+    .get(threadId) as { a: string | null; b: string | null } | null;
+  return row?.a ? { startedAt: row.a, completedAt: row.b, activeMs: Math.max(0, Date.parse(row.b!) - Date.parse(row.a)) } : null;
 }
 
 /** Fallback when no transcript is readable: largest context snapshot T3 saw. */
@@ -262,7 +308,7 @@ export function buildTree(rootThreadId: string): AgentNode | null {
   const root = threadRow(rootThreadId);
   if (!root) return null;
   const rp = parse(root.payload_json);
-  const run = threadRunState(rootThreadId);
+  const run = threadRunState(rootThreadId) ?? legacyRun(rootThreadId);
   const rootNode: AgentNode = {
     id: `thread:${rootThreadId}`,
     threadId: rootThreadId,
@@ -359,7 +405,7 @@ export function buildTree(rootThreadId: string): AgentNode | null {
     for (const { t, hint } of started) {
       if (childThreadsFromSubs.has(t.thread_id) || ownerOfThread.has(t.thread_id) || t.thread_id === rootThreadId) continue;
       const tp = parse(t.payload_json);
-      const r = threadRunState(t.thread_id);
+      const r = threadRunState(t.thread_id) ?? legacyRun(t.thread_id);
       const node: AgentNode = {
         id: `thread:${t.thread_id}`,
         threadId: t.thread_id,
@@ -410,7 +456,7 @@ export function buildTree(rootThreadId: string): AgentNode | null {
 export function listThreads(limit = 60): ThreadSummary[] {
   const rows = conn()
     .query(
-      `select t.thread_id, t.title, t.default_provider, t.updated_at,
+      `select t.thread_id, t.title, t.default_provider, t.updated_at, t.project_id,
               (select count(*) from orchestration_v2_projection_subagents s where s.thread_id = t.thread_id) as subs,
               exists(select 1 from orchestration_v2_projection_runs r where r.thread_id = t.thread_id and r.status = 'running') as running
        from orchestration_v2_projection_threads t
@@ -418,7 +464,16 @@ export function listThreads(limit = 60): ThreadSummary[] {
          and json_extract(t.payload_json, '$.lineage.parentThreadId') is null
        order by t.updated_at desc limit ?`,
     )
-    .all(limit + 40) as { thread_id: string; title: string; default_provider: string; updated_at: string; subs: number; running: number }[];
+    .all(limit + 40) as {
+    thread_id: string;
+    title: string;
+    default_provider: string;
+    updated_at: string;
+    project_id: string;
+    subs: number;
+    running: number;
+  }[];
+  const projects = projectMap();
   const launched = allLaunchedThreadIds();
   const children = (id: string) =>
     (conn().query(`select count(*) as n from orchestration_v2_projection_threads where json_extract(payload_json, '$.lineage.parentThreadId') = ?
@@ -430,7 +485,113 @@ export function listThreads(limit = 60): ThreadSummary[] {
     updatedAt: r.updated_at,
     agents: r.subs + children(r.thread_id) + launchedThreads(r.thread_id).length,
     running: !!r.running,
+    projectId: r.project_id,
+    project: projects.get(r.project_id)?.title ?? "Unknown project",
+    workspaceRoot: projects.get(r.project_id)?.root ?? null,
   }));
+}
+
+// ---------- projects ----------
+
+function projectMap() {
+  const rows = conn().query(`select project_id, title, workspace_root from projection_projects`).all() as {
+    project_id: string;
+    title: string;
+    workspace_root: string;
+  }[];
+  return new Map(rows.map((r) => [r.project_id, { title: r.title, root: r.workspace_root }]));
+}
+
+const COMM_TOOLS: [string, ThreadLink["kind"]][] = [
+  ["t3_thread_send", "message"],
+  ["t3_thread_read", "read"],
+  ["t3_thread_wait", "read"],
+];
+
+/**
+ * Every top-level thread in a T3 project (= a directory, worktrees included) as one forest under a
+ * project card, plus the thread-to-thread calls between them.
+ */
+export function buildProject(projectId: string, limit = 12): AgentNode | null {
+  const meta = projectMap().get(projectId);
+  if (!meta) return null;
+  const launched = allLaunchedThreadIds();
+  const ids = (
+    conn()
+      .query(
+        `select thread_id from orchestration_v2_projection_threads
+         where project_id = ? and deleted_at is null and archived_at is null
+           and json_extract(payload_json, '$.lineage.parentThreadId') is null
+         order by updated_at desc`,
+      )
+      .all(projectId) as { thread_id: string }[]
+  )
+    .map((r) => r.thread_id)
+    .filter((id) => !launched.has(id))
+    .slice(0, limit)
+    .reverse(); // oldest first, left to right
+  const threads = ids.map((id) => buildTree(id)).filter((t): t is AgentNode => !!t);
+
+  const project: AgentNode = {
+    id: `project:${projectId}`,
+    threadId: null,
+    parentId: null,
+    origin: "project",
+    provider: "project",
+    name: meta.title,
+    model: meta.root.replace(homedir(), "~"),
+    task: `${threads.length} thread${threads.length === 1 ? "" : "s"}`,
+    prompt: meta.root,
+    result: null,
+    status: threads.some((t) => t.status === "running") ? "running" : "done",
+    startedAt: null,
+    completedAt: null,
+    costUsd: null,
+    tokens: 0,
+    usageSource: "none",
+    tools: [],
+    children: threads,
+    links: [],
+  };
+  for (const t of threads) t.parentId = project.id;
+
+  // threadId -> card, across every tree in the project.
+  const cardOf = new Map<string, string>();
+  const walk = (n: AgentNode) => {
+    if (n.threadId) cardOf.set(n.threadId, n.id);
+    n.children.forEach(walk);
+  };
+  threads.forEach(walk);
+
+  const allThreads = [...cardOf.keys()];
+  if (allThreads.length) {
+    const rows = conn()
+      .query(
+        `select thread_id as caller, json_extract(payload_json, '$.toolName') as tool,
+                json_extract(payload_json, '$.input.threadId') as target,
+                count(*) as n, min(json_extract(payload_json, '$.startedAt')) as at
+         from orchestration_v2_projection_turn_items
+         where type = 'dynamic_tool' and thread_id in (${allThreads.map(() => "?").join(",")})
+           and json_extract(payload_json, '$.input.threadId') is not null
+         group by 1, 2, 3`,
+      )
+      .all(...allThreads) as { caller: string; tool: string; target: string; n: number; at: string }[];
+    const merged = new Map<string, ThreadLink>();
+    for (const r of rows) {
+      const kind = COMM_TOOLS.find(([t]) => r.tool?.endsWith(t))?.[1];
+      const from = cardOf.get(r.caller);
+      const to = cardOf.get(r.target);
+      if (!kind || !from || !to || from === to) continue;
+      const key = `${from}>${to}>${kind}`;
+      const link = merged.get(key);
+      if (link) {
+        link.count += r.n;
+        if (r.at < link.at) link.at = r.at;
+      } else merged.set(key, { from, to, kind, count: r.n, at: r.at });
+    }
+    project.links = [...merged.values()];
+  }
+  return project;
 }
 
 /** Most interesting thread to show by default: newest one with subagents, preferring a running one. */

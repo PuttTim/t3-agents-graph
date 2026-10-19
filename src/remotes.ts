@@ -76,3 +76,7 @@ async function refreshThreads(remote: Remote): Promise<RemoteThreads> {
 export async function remoteTree(remote: Remote, threadId: string): Promise<AgentNode | null> {
   return get<AgentNode | null>(remote, `/api/local/tree?thread=${encodeURIComponent(threadId)}`);
 }
+
+export async function remoteProject(remote: Remote, projectId: string): Promise<AgentNode | null> {
+  return get<AgentNode | null>(remote, `/api/local/project?id=${encodeURIComponent(projectId)}`);
+}

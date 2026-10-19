@@ -17,7 +17,10 @@ const cursor = `<svg viewBox="0 0 24 24"><path d="M12 2l9 5v10l-9 5-9-5V7z" fill
 
 const generic = `<svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 20c1.2-3.6 3.8-5.4 7-5.4s5.8 1.8 7 5.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
 
+const folder = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 014.5 5h4.2l2 2.2h8.8A1.5 1.5 0 0121 8.7v9.8a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 18.5z"/></svg>`;
+
 export function providerIcon(provider = "", model = "") {
+  if (provider === "project") return folder;
   const p = `${provider} ${model}`.toLowerCase();
   if (p.includes("gemini")) return gemini;
   if (p.includes("claude") || p.includes("opus") || p.includes("sonnet") || p.includes("haiku") || p.includes("fable")) return claude;
