@@ -27,6 +27,7 @@ const state = {
   selected: null,
   cards: new Map(),
   wireEls: new Map(),
+  dotEls: new Map(),
   firstPaint: true,
 };
 
@@ -191,6 +192,9 @@ function cardEl(node) {
   return el;
 }
 
+function setAttr(el, name, v) {
+  if (el.getAttribute(name) !== String(v)) el.setAttribute(name, v);
+}
 function setText(el, sel, v) {
   const t = el.querySelector(sel);
   if (t.textContent !== v) t.textContent = v;
@@ -204,7 +208,8 @@ function setHTML(el, sel, v) {
 }
 
 function updateCard(el, node, p) {
-  el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+  const tf = `translate(${p.x}px, ${p.y}px)`;
+  if (el.style.transform !== tf) el.style.transform = tf;
   el.classList.toggle("stopped", node.status === "stopped");
   el.classList.toggle("selected", state.selected === node.id);
   setHTML(el, ".tile", providerIcon(node.provider, node.model));
@@ -212,11 +217,11 @@ function updateCard(el, node, p) {
   setText(el, ".model", modelLabel(node.model, node.provider));
   const st = statusMeta[node.status] ?? statusMeta.done;
   const pill = el.querySelector(".pill");
-  pill.className = `pill ${node.status}`;
+  if (pill.className !== `pill ${node.status}`) pill.className = `pill ${node.status}`;
   setHTML(el, ".pill", `${st.icon}${st.label}`);
   setHTML(el, ".tools", toolBadges(node.tools));
   setText(el, ".text", node.task);
-  el.querySelector(".task").title = node.prompt ?? node.task;
+  setAttr(el.querySelector(".task"), "title", node.prompt ?? node.task);
   const t = node._total;
   setText(el, ".cost", t.priced ? money(t.cost) : t.tok ? tokens(t.tok) : "");
   setText(el, ".dur", (t.priced || t.tok ? " · " : "") + duration(node));
@@ -234,6 +239,7 @@ function render() {
     state.cards.clear();
     wires.innerHTML = "";
     state.wireEls.clear();
+    state.dotEls.clear();
     $("#empty").innerHTML = state.threads.length
       ? "No thread selected."
       : "No T3 Code threads found.<br><code>Looking in ~/.t3/userdata/statev2.sqlite</code>";
@@ -242,10 +248,10 @@ function render() {
 
   rollup(root);
   const { pos, links, width, height } = layout(root);
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-  wires.setAttribute("width", width);
-  wires.setAttribute("height", height);
+  if (canvas.style.width !== `${width}px`) canvas.style.width = `${width}px`;
+  if (canvas.style.height !== `${height}px`) canvas.style.height = `${height}px`;
+  setAttr(wires, "width", width);
+  setAttr(wires, "height", height);
 
   // cards
   const live = new Set();
@@ -286,16 +292,25 @@ function render() {
       state.wireEls.delete(id);
     }
   }
-  wires.querySelectorAll("circle").forEach((c) => c.remove());
-  const parents = new Set(links.map((l) => l.from));
-  for (const n of parents) {
-    const p = pos.get(n.id);
-    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    const top = n === root;
-    c.setAttribute("cx", top ? p.x + W / 2 : p.x + ELBOW_X);
-    c.setAttribute("cy", p.y + H);
-    c.setAttribute("r", 3.5);
-    wires.appendChild(c);
+  // Dots where a card's children leave it. Keyed and diffed, since a replay renders 20x a second.
+  const dots = new Map(links.map((l) => [l.from.id, l.from]));
+  for (const [id, c] of state.dotEls) {
+    if (!dots.has(id)) {
+      c.remove();
+      state.dotEls.delete(id);
+    }
+  }
+  for (const [id] of dots) {
+    const p = pos.get(id);
+    let c = state.dotEls.get(id);
+    if (!c) {
+      c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("r", 3.5);
+      wires.appendChild(c);
+      state.dotEls.set(id, c);
+    }
+    setAttr(c, "cx", id === root.id ? p.x + W / 2 : p.x + ELBOW_X);
+    setAttr(c, "cy", p.y + H);
   }
 
   // header
@@ -422,6 +437,7 @@ function reset() {
   state.cards.clear();
   wires.innerHTML = "";
   state.wireEls.clear();
+  state.dotEls.clear();
 }
 
 // ---------- data ----------
