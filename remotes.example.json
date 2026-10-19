@@ -1,0 +1,4 @@
+[
+  { "name": "Studio", "url": "http://studio.tailnet-name.ts.net:4317" },
+  { "name": "Linux box", "url": "http://100.101.102.103:4317", "token": "optional-per-machine-token" }
+]
