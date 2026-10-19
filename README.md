@@ -51,10 +51,18 @@ All reads are read-only. Nothing goes over the network.
 | Claude cost and tools | Claude Code transcripts: `~/.claude/projects/*/<session>.jsonl` and `*/<session>/subagents/agent-<id>.jsonl` (+ `.meta.json` for agent type) |
 | Codex cost and tools | `~/.codex/sessions/**/rollout-*-<threadId>.jsonl` (`token_count` totals) |
 | Prices | `~/.t3/userdata/usage-model-rates.json`, the LiteLLM table T3 already caches |
+| Conductor history | `~/Library/Application Support/com.conductor.app/conductor.db` (if present) |
 
 Threads an agent starts with T3's MCP tools (`t3_thread_launch`, `create_threads`,
 `t3_thread_fork`) are top-level threads with no lineage, so they're linked from the tool call's
 result instead.
+
+**Conductor.** If you used [Conductor](https://conductor.build) before T3, its sessions show up
+too, each repo as a "<repo> (Conductor)" project, with titles suffixed by the workspace name.
+Conductor stores every SDK message, so subagents come from `parent_tool_use_id` (nesting and
+background agents included) and replay uses each turn's recorded duration. Its stored messages
+undercount tokens, so cost comes from what the SDK billed per turn, split across agents by their
+share of the traffic; per-agent figures are close, session totals are exact.
 
 Other harnesses (OpenCode, Cursor, ...) still show up in the tree because T3 projects their
 subagents into the same table. For cost they fall back to T3's context-token snapshot.
@@ -82,4 +90,4 @@ token, open the page as `http://localhost:4317/?token=...`. You can also set rem
 
 The server listens on 127.0.0.1 unless you set `HOST`.
 
-Env overrides: `PORT`, `HOST`, `AGENT_GRAPH_NAME`, `AGENT_GRAPH_TOKEN`, `T3_USERDATA`, `T3_DB`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`.
+Env overrides: `PORT`, `HOST`, `AGENT_GRAPH_NAME`, `AGENT_GRAPH_TOKEN`, `T3_USERDATA`, `T3_DB`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `CONDUCTOR_DB`.

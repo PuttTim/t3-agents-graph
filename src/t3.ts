@@ -4,6 +4,7 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { buildConductorProject, buildConductorTree, isConductorId, listConductorThreads } from "./conductor";
 import { claudeAgentMeta, emptyUsage, mergeUsage, usageFor, type NativeRef, type Usage } from "./usage";
 
 const USERDATA = process.env.T3_USERDATA ?? join(homedir(), ".t3", "userdata");
@@ -96,13 +97,13 @@ function mapStatus(s: string | null | undefined): Status {
   }
 }
 
-const firstLine = (s: string | null | undefined, max = 160) => {
+export const firstLine = (s: string | null | undefined, max = 160) => {
   if (!s) return "";
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? t.slice(0, max - 1) + "…" : t;
 };
 
-const prettyName = (s: string) =>
+export const prettyName = (s: string) =>
   s
     .replace(/^\/?root\//, "")
     .replace(/[-_]+/g, " ")
@@ -305,6 +306,7 @@ type SubRow = {
 };
 
 export function buildTree(rootThreadId: string): AgentNode | null {
+  if (isConductorId(rootThreadId)) return buildConductorTree(rootThreadId);
   const root = threadRow(rootThreadId);
   if (!root) return null;
   const rp = parse(root.payload_json);
@@ -453,7 +455,12 @@ export function buildTree(rootThreadId: string): AgentNode | null {
   return rootNode;
 }
 
+/** T3's newest threads, then Conductor's history (all of it: nothing new arrives there). */
 export function listThreads(limit = 60): ThreadSummary[] {
+  return [...listT3Threads(limit), ...listConductorThreads()];
+}
+
+function listT3Threads(limit: number): ThreadSummary[] {
   const rows = conn()
     .query(
       `select t.thread_id, t.title, t.default_provider, t.updated_at, t.project_id,
@@ -513,6 +520,7 @@ const COMM_TOOLS: [string, ThreadLink["kind"]][] = [
  * project card, plus the thread-to-thread calls between them.
  */
 export function buildProject(projectId: string, limit = 12): AgentNode | null {
+  if (isConductorId(projectId)) return buildConductorProject(projectId, limit);
   const meta = projectMap().get(projectId);
   if (!meta) return null;
   const launched = allLaunchedThreadIds();
@@ -596,6 +604,6 @@ export function buildProject(projectId: string, limit = 12): AgentNode | null {
 
 /** Most interesting thread to show by default: newest one with subagents, preferring a running one. */
 export function defaultThreadId(): string | null {
-  const all = listThreads(40);
+  const all = listT3Threads(40);
   return (all.find((t) => t.running && t.agents) ?? all.find((t) => t.agents) ?? all[0])?.threadId ?? null;
 }
