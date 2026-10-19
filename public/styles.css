@@ -747,8 +747,14 @@ select[hidden] {
   }
 }
 
-.open-thread {
+.drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 4px;
+}
+
+.open-thread {
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
@@ -757,10 +763,16 @@ select[hidden] {
   padding: 5px 10px;
   border-radius: 7px;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .open-thread:hover {
   border-color: var(--wire);
+}
+
+.open-thread:focus-visible {
+  outline: 2px solid var(--wire);
+  outline-offset: 2px;
 }
 
 .tools:empty {

@@ -1,4 +1,4 @@
-import { buildProject, buildTree, defaultThreadId, listThreads } from "./src/t3";
+import { buildProject, buildTree, defaultThreadId, listThreads, t3EnvironmentId } from "./src/t3";
 import { loadRemotes, remoteProject, remoteThreads, remoteTree } from "./src/remotes";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -22,12 +22,13 @@ function authorized(req: Request, url: URL) {
   return req.headers.get("authorization") === `Bearer ${TOKEN}` || url.searchParams.get("token") === TOKEN;
 }
 
-type Env = { id: string; name: string; error: string | null };
+/** `id` is this graph's machine key ("local" or a remote's name); `t3EnvironmentId` is T3's own UUID, if known. */
+type Env = { id: string; name: string; t3EnvironmentId: string | null; error: string | null };
 
 async function snapshot(envId: string | null, threadId: string | null, projectId: string | null = null) {
   const lists = await Promise.all(remotes.map(remoteThreads));
-  const envs: Env[] = [{ id: "local", name: LOCAL_NAME, error: null }].concat(
-    lists.map((l) => ({ id: l.remote.name, name: l.remote.name, error: l.error })),
+  const envs: Env[] = [{ id: "local", name: LOCAL_NAME, t3EnvironmentId: t3EnvironmentId(), error: null }].concat(
+    lists.map((l) => ({ id: l.remote.name, name: l.remote.name, t3EnvironmentId: l.t3EnvironmentId, error: l.error })),
   );
   const threads = listThreads().map((t) => ({ ...t, env: "local" }));
   for (const l of lists) threads.push(...l.threads.map((t) => ({ ...t, env: l.remote.name })));
@@ -81,6 +82,7 @@ const server = Bun.serve({
 
     // What other machines read from this one (no federation, so no loops).
     if (url.pathname === "/api/local/threads") return json(listThreads());
+    if (url.pathname === "/api/local/info") return json({ t3EnvironmentId: t3EnvironmentId() });
     if (url.pathname === "/api/local/project") {
       const id = url.searchParams.get("id");
       return json(id ? buildProject(id) : null);

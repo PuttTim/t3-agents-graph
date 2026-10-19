@@ -29,7 +29,23 @@ running anywhere in the tree (e.g. overnight between turns) are squeezed to 2 se
 thread spanning a day replays in minutes. You can switch speed mid-replay. `?replay=10` starts
 one on load, and `?at=0.5` starts it halfway.
 
-Click a card to see its prompt, result, tools, tokens and cost. The `2 v` button folds
+Click a card to see its prompt, result, tools, tokens and cost. **Open in T3** there opens that
+conversation in the T3 Code desktop app through `t3code://threads/<environmentId>/<threadId>`.
+Notes:
+
+- **Which cards get it.** Threads, launched threads and `delegate_task` children open their own
+  T3 thread. Native subagents (Task/Agent) have no T3 thread of their own, so theirs reads
+  **Open parent thread in T3** and opens the closest parent thread. Project cards and Conductor
+  history have no link.
+- **Environment ID.** The environment ID is T3's UUID from `<T3_USERDATA or ~/.t3/userdata>/environment-id`.
+  It is not the graph's `local` or remote machine name. Remote machines report theirs at
+  `/api/local/info`. Older remote servers lack that endpoint, so their cards show no link.
+- **What T3 needs.** You need a T3 build that handles these links (recent Nightly does; Alpha
+  0.0.40 registers the scheme but ignores the path). If several T3 apps are installed, they all
+  claim `t3code://`, and the OS picks which one opens. A remote machine's thread only opens if
+  your T3 app already knows that environment, e.g. through T3 Connect.
+
+The `2 v` button folds
 children. Drag to pan, use the bottom-right zoom controls, or ctrl/cmd + scroll (trackpad pinch)
 to zoom toward the pointer. `+` / `-` zoom, `0` resets to 100%, and `F` fits the tree to the
 screen. Zoom ranges from 20% to 200%.

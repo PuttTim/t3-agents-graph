@@ -44,7 +44,7 @@ async function get<T>(remote: Remote, path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export type RemoteThreads = { remote: Remote; threads: ThreadSummary[]; error: string | null };
+export type RemoteThreads = { remote: Remote; threads: ThreadSummary[]; t3EnvironmentId: string | null; error: string | null };
 
 // Thread lists change slowly; cache them so the 1s SSE tick doesn't hammer every machine.
 const listCache = new Map<string, { at: number; value: RemoteThreads }>();
@@ -65,9 +65,15 @@ async function refreshThreads(remote: Remote): Promise<RemoteThreads> {
   const hit = listCache.get(remote.url);
   let value: RemoteThreads;
   try {
-    value = { remote, threads: await get<ThreadSummary[]>(remote, "/api/local/threads"), error: null };
+    const [threads, info] = await Promise.all([
+      get<ThreadSummary[]>(remote, "/api/local/threads"),
+      // Older servers don't have /api/local/info: no "Open in T3" links for them, nothing else breaks.
+      get<{ t3EnvironmentId?: string | null }>(remote, "/api/local/info").catch(() => null),
+    ]);
+    const t3EnvironmentId = info?.t3EnvironmentId ?? hit?.value.t3EnvironmentId ?? null;
+    value = { remote, threads, t3EnvironmentId, error: null };
   } catch (e) {
-    value = { remote, threads: hit?.value.threads ?? [], error: String((e as Error).message ?? e) };
+    value = { remote, threads: hit?.value.threads ?? [], t3EnvironmentId: hit?.value.t3EnvironmentId ?? null, error: String((e as Error).message ?? e) };
   }
   listCache.set(remote.url, { at: Date.now(), value });
   return value;

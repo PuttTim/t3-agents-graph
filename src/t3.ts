@@ -2,6 +2,7 @@
 // Works for every harness T3 drives: subagents are projected provider-agnostically
 // into orchestration_v2_projection_subagents (native Task/Agent tools and T3 delegate_task alike).
 import { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { buildConductorProject, buildConductorTree, isConductorId, listConductorThreads } from "./conductor";
@@ -9,6 +10,16 @@ import { claudeAgentMeta, emptyUsage, mergeUsage, usageFor, type NativeRef, type
 
 const USERDATA = process.env.T3_USERDATA ?? join(homedir(), ".t3", "userdata");
 const DB_PATH = process.env.T3_DB ?? join(USERDATA, "statev2.sqlite");
+
+/** T3's own UUID for this install, which its `t3code://threads/<env>/<thread>` links need. */
+let environmentId: string | null = null;
+export function t3EnvironmentId(): string | null {
+  if (environmentId) return environmentId;
+  try {
+    environmentId = readFileSync(join(USERDATA, "environment-id"), "utf8").trim() || null;
+  } catch {}
+  return environmentId;
+}
 
 let db: Database | null = null;
 function conn() {

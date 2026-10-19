@@ -2,6 +2,7 @@ import { chevron, providerIcon, statusMeta, toolBadges } from "./icons.js";
 import { startDemo } from "./demo.js";
 import { buildTimeline, timeAt, treeAt } from "./replay.js";
 import { canvasPng, canvasSvg, download, fileName, treeJson } from "./export.js";
+import { t3LinkFor } from "./t3link.js";
 
 const W = 300; // keep in sync with --card-w
 const H = 136; // --card-h
@@ -502,6 +503,15 @@ function findNode(id) {
   return hit;
 }
 
+/** Parents of `id`, nearest first. */
+function ancestorsOf(id) {
+  const parents = new Map();
+  if (state.tree) walk(state.tree, (n, _d, p) => parents.set(n.id, p));
+  const out = [];
+  for (let p = parents.get(id); p; p = parents.get(p.id)) out.push(p);
+  return out;
+}
+
 function openDrawer(id) {
   state.selected = id;
   $("#drawer").hidden = false;
@@ -509,7 +519,7 @@ function openDrawer(id) {
 }
 
 $("#drawer-body").addEventListener("click", (e) => {
-  const b = e.target.closest(".open-thread");
+  const b = e.target.closest("button.open-thread");
   if (b) navigate({ env: state.shownEnv === "local" ? "" : state.shownEnv, threadId: b.dataset.thread });
 });
 
@@ -519,6 +529,18 @@ $("#drawer-close").onclick = () => {
   render();
 };
 addEventListener("keydown", (e) => e.key === "Escape" && $("#drawer-close").click());
+
+function actions(n) {
+  const view = state.projectId && n.threadId ? `<button class="open-thread" data-thread="${esc(n.threadId)}">Open thread view</button>` : "";
+  const env = state.envs.find((e) => e.id === state.shownEnv);
+  const t3 = t3LinkFor(n, ancestorsOf(n.id), env?.t3EnvironmentId);
+  const open = !t3
+    ? ""
+    : t3.parent
+      ? `<a class="open-thread" href="${esc(t3.url)}" title="Native subagents have no T3 thread of their own" aria-label="Open parent thread ${esc(t3.name)} in T3">Open parent thread in T3</a>`
+      : `<a class="open-thread" href="${esc(t3.url)}" aria-label="Open this thread in T3">Open in T3</a>`;
+  return view || open ? `<div class="drawer-actions">${view}${open}</div>` : "";
+}
 
 function renderDrawer() {
   const n = findNode(state.selected);
@@ -538,7 +560,7 @@ function renderDrawer() {
       ${state.envs.length > 1 ? `<dt>Machine</dt><dd>${esc(state.envs.find((e) => e.id === state.shownEnv)?.name ?? state.shownEnv)}</dd>` : ""}
       ${n.threadId ? `<dt>Thread</dt><dd>${esc(n.threadId)}</dd>` : ""}
     </dl>
-    ${state.projectId && n.threadId ? `<button class="open-thread" data-thread="${esc(n.threadId)}">Open thread view</button>` : ""}
+    ${actions(n)}
     ${n.tools.length ? `<h3>Tools</h3><div class="chips">${n.tools.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : ""}
     ${n.prompt ? `<h3>Prompt</h3><pre>${esc(n.prompt)}</pre>` : ""}
     ${n.result ? `<h3>Result</h3><pre>${esc(n.result)}</pre>` : ""}`;
