@@ -16,10 +16,23 @@ const AGENT_TOOLS = ["Agent", "Task"];
 
 export const isConductorId = (id: string) => id.startsWith(PREFIX);
 
-let db: Database | null | undefined;
+let db: { conn: Database; immutable: boolean } | null = null;
+let warned = false;
 function conn(): Database | null {
-  if (db === undefined) db = existsSync(DB_PATH) ? new Database(DB_PATH, { readonly: true }) : null;
-  return db;
+  // A WAL database can't be opened read-only without its -shm file, which Conductor deletes when it
+  // quits. With no -wal there's nothing unflushed, so open it immutable; reopen if Conductor starts.
+  const immutable = !existsSync(`${DB_PATH}-wal`);
+  if (db && db.immutable !== immutable) (db.conn.close(), (db = null));
+  if (!db && existsSync(DB_PATH)) {
+    try {
+      const uri = `file:${encodeURI(DB_PATH)}?mode=ro${immutable ? "&immutable=1" : ""}`;
+      db = { conn: new Database(uri, { readonly: true }), immutable };
+    } catch (e) {
+      if (!warned) console.warn(`Skipping Conductor history (${DB_PATH}): ${e}`);
+      warned = true;
+    }
+  }
+  return db?.conn ?? null;
 }
 
 const parse = (s: string | null) => {

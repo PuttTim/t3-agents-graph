@@ -457,7 +457,13 @@ export function buildTree(rootThreadId: string): AgentNode | null {
 
 /** T3's newest threads, then Conductor's history (all of it: nothing new arrives there). */
 export function listThreads(limit = 60): ThreadSummary[] {
-  return [...listT3Threads(limit), ...listConductorThreads()];
+  let conductor: ThreadSummary[] = [];
+  try {
+    conductor = listConductorThreads();
+  } catch (e) {
+    console.warn(`Conductor history unavailable: ${e}`); // never hide T3's own threads
+  }
+  return [...listT3Threads(limit), ...conductor];
 }
 
 function listT3Threads(limit: number): ThreadSummary[] {
