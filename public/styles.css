@@ -427,6 +427,12 @@ main.dragging {
   font-variant-numeric: tabular-nums;
 }
 
+.foot .end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .foot b {
   color: var(--text);
   font-weight: 500;

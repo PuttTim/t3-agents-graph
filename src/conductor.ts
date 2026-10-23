@@ -266,6 +266,11 @@ function build(c: Database, sessionId: string): AgentNode | null {
   }
 
   applyUsage(root, agents, entries, billed, unsplit);
+  // Streamed replies repeat their message id, so count each reply with text once.
+  const replies = new Set<string>();
+  for (const d of entries.get("root")!)
+    if (d.message?.content?.some((b: any) => b?.type === "text" && b.text?.trim())) replies.add(d.message.id ?? d.uuid);
+  root.messages = { in: rows.filter((r) => r.role === "user").length, out: replies.size };
   root.model ??= s.model;
   return root;
 }

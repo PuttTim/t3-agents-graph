@@ -93,6 +93,9 @@ function footDuration(n) {
   return d && (t.priced || t.tok) ? ` · ${d}` : d;
 }
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const messagesTitle = (m) => `${plural(m.in, "message")} in (user) · ${plural(m.out, "message")} out (agent)`;
+
 const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`) + " tok";
 
 /** Cost of a node including everything it started (like the original: parent cost rolls up). */
@@ -233,7 +236,7 @@ function cardEl(node) {
       <span class="pill"></span>
     </div>
     <div class="task"><span class="tools"></span><span class="text"></span></div>
-    <div class="foot"><span><b class="cost"></b><span class="dur"></span></span><button class="kids" hidden></button></div>`;
+    <div class="foot"><span><b class="cost"></b><span class="dur"></span></span><span class="end"><span class="msgs"></span><button class="kids" hidden></button></span></div>`;
   el.addEventListener("click", (e) => {
     if (e.target.closest(".kids")) return;
     openDrawer(node.id);
@@ -280,6 +283,9 @@ function updateCard(el, node, p) {
   const t = node._total;
   setText(el, ".cost", t.priced ? money(t.cost) : t.tok ? tokens(t.tok) : "");
   setText(el, ".dur", footDuration(node));
+  const m = node.messages;
+  setText(el, ".msgs", m ? `In ${m.in} · Out ${m.out}` : "");
+  setAttr(el.querySelector(".msgs"), "title", m ? messagesTitle(m) : "");
   const kids = el.querySelector(".kids");
   kids.hidden = node.children.length === 0;
   kids.classList.toggle("collapsed", state.collapsed.has(node.id));
@@ -556,6 +562,7 @@ function renderDrawer() {
       <dt>Provider</dt><dd>${esc(n.provider)}${n.model ? ` / ${esc(n.model)}` : ""}</dd>
       <dt>Cost</dt><dd>${own} own${n.children.length ? ` · ${n._total.priced ? money(n._total.cost) : "n/a"} incl. children` : ""}</dd>
       <dt>Tokens</dt><dd>${n.tokens ? tokens(n.tokens) : "n/a"} <span style="color:var(--muted)">(${src})</span></dd>
+      ${n.messages ? `<dt>Messages</dt><dd>${messagesTitle(n.messages)}</dd>` : ""}
       <dt>Started</dt><dd>${n.startedAt ? new Date(n.startedAt).toLocaleString() : "n/a"}</dd>
       ${state.envs.length > 1 ? `<dt>Machine</dt><dd>${esc(state.envs.find((e) => e.id === state.shownEnv)?.name ?? state.shownEnv)}</dd>` : ""}
       ${n.threadId ? `<dt>Thread</dt><dd>${esc(n.threadId)}</dd>` : ""}

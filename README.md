@@ -29,7 +29,9 @@ running anywhere in the tree (e.g. overnight between turns) are squeezed to 2 se
 thread spanning a day replays in minutes. You can switch speed mid-replay. `?replay=10` starts
 one on load, and `?at=0.5` starts it halfway.
 
-Click a card to see its prompt, result, tools, tokens and cost. **Open in T3** there opens that
+Click a card to see its prompt, result, tools, tokens and cost. Cards with their own thread show
+how many messages went **In** (sent by the user, or the parent agent's prompt) and **Out** (replies
+from the agent). **Open in T3** there opens that
 conversation in the T3 Code desktop app through `t3code://threads/<environmentId>/<threadId>`.
 Notes:
 

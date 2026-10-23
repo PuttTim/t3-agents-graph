@@ -52,6 +52,8 @@ export type AgentNode = {
   tokens: number;
   usageSource: "transcript" | "context" | "none";
   tools: string[];
+  /** Agents with their own thread: messages the user (or parent agent) sent in, and replies sent out. */
+  messages?: { in: number; out: number };
   children: AgentNode[];
   /** Project view only: thread-to-thread calls (t3_thread_send / read / wait) between cards. */
   links?: ThreadLink[];
@@ -213,6 +215,20 @@ function legacySpan(threadId: string) {
   return row?.a ? { startedAt: row.a, completedAt: row.b, activeMs: Math.max(0, Date.parse(row.b!) - Date.parse(row.a)) } : null;
 }
 
+function messageCounts(threadId: string): { in: number; out: number } {
+  const row = conn()
+    .query(
+      `select sum(type = 'user_message') as i, sum(type = 'assistant_message') as o
+       from orchestration_v2_projection_turn_items where thread_id = ?`,
+    )
+    .get(threadId) as { i: number | null; o: number | null } | null;
+  if (row?.i || row?.o) return { in: row.i ?? 0, out: row.o ?? 0 };
+  const legacy = conn()
+    .query(`select sum(role = 'user') as i, sum(role = 'assistant') as o from projection_thread_messages where thread_id = ?`)
+    .get(threadId) as { i: number | null; o: number | null } | null;
+  return { in: legacy?.i ?? 0, out: legacy?.o ?? 0 };
+}
+
 /** Fallback when no transcript is readable: largest context snapshot T3 saw. */
 function contextTokens(threadId: string): number {
   const row = conn()
@@ -259,6 +275,7 @@ function applyUsage(node: AgentNode, refs: NativeRef[]) {
     node.usageSource = node.tokens ? "context" : "none";
   }
   if (!node.tools.length && node.threadId) node.tools = toolsFromTurnItems(node.threadId);
+  if (node.threadId) node.messages = messageCounts(node.threadId);
 }
 
 const LAUNCH_TOOLS = ["t3_thread_launch", "create_threads", "t3_thread_fork"];

@@ -61,7 +61,7 @@ export function timeAt(tl, p) {
   return tl.end;
 }
 
-/** The tree as it looked at thread time `t`: unstarted agents hidden, cost and tokens grown pro rata. */
+/** The tree as it looked at thread time `t`: unstarted agents hidden, cost, tokens and messages grown pro rata. */
 export function treeAt(node, t, now) {
   if (startOf(node) > t) return null;
   const children = node.children.map((c) => treeAt(c, t, now)).filter(Boolean);
@@ -102,5 +102,6 @@ export function treeAt(node, t, now) {
 
   if (node.costUsd != null) out.costUsd = node.costUsd * frac;
   out.tokens = Math.round((node.tokens ?? 0) * frac);
+  if (node.messages) out.messages = { in: Math.ceil(node.messages.in * frac), out: Math.round(node.messages.out * frac) };
   return out;
 }
